@@ -1,0 +1,64 @@
+name: base
+run-name: base ${{ inputs.version }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: A version registered in versions.json
+        required: true
+        type: string
+      source:
+        description: Repository containing the game's source commit
+        required: true
+        default: CihuyAkz/starling-extras
+        type: string
+      tools:
+        description: Optional commit or branch containing the Android build scripts; blank uses the game commit
+        required: false
+        default: ""
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: base-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  base:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env:
+      VERSION: ${{ inputs.version }}
+      SOURCE_REPO: ${{ inputs.source }}
+      TOOLS_REPO: ${{ inputs.source }}
+      TOOLS: ${{ inputs.tools }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare source and build tools
+        run: bash scripts/prepare.sh
+      - name: Install Rust, Android tools and crates
+        run: bash scripts/tools.sh
+      - name: Make room
+        run: bash scripts/room.sh clean
+      - name: Build clean cache
+        env:
+          MOD_BUILD_BASE: '1'
+          MOD_BUILD_SECONDS: '14000'
+        run: |
+          job=$HOME/modbuild/jobs/base
+          mkdir -p "$job/out" "$job/mods"
+          cp -r "$HOME/modbuild/source/native-mods/wrench/mixins/wrench" "$job/mods/wrench"
+          started=$(date +%s)
+          bash tools/mod_build_sandbox.sh "$HOME/modbuild" "$COMMIT" "$job"
+          echo "Cold build: $(( $(date +%s) - started )) s"
+          du -sh "$HOME/modbuild/base" "$HOME/modbuild/cargo" "$HOME/android" "$HOME/.rustup"
+          sudo rm -rf "$job"
+      - uses: actions/cache/save@v4
+        with:
+          key: base-${{ env.COMMIT }}
+          path: |
+            ~/.rustup
+            ~/android
+            ~/modbuild/cargo
+            ~/modbuild/base
