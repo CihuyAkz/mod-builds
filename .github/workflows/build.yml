@@ -1,0 +1,72 @@
+name: build
+run-name: build ${{ inputs.ask }}
+on:
+  workflow_dispatch:
+    inputs:
+      ask:
+        description: Random request key held by the build gateway
+        required: true
+        type: string
+      version:
+        description: A version registered in versions.json
+        required: true
+        type: string
+      gateway:
+        description: Public HTTPS URL of the build gateway
+        required: true
+        type: string
+      source:
+        description: Repository containing the game's source commit
+        required: true
+        default: CihuyAkz/starling-extras
+        type: string
+      tools:
+        description: Optional commit or branch containing the Android build scripts; blank uses the game commit
+        required: false
+        default: ""
+        type: string
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    env:
+      VERSION: ${{ inputs.version }}
+      SOURCE_REPO: ${{ inputs.source }}
+      TOOLS_REPO: ${{ inputs.source }}
+      TOOLS: ${{ inputs.tools }}
+      ASK: ${{ inputs.ask }}
+      GATEWAY: ${{ inputs.gateway }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Prepare source and build tools
+        run: bash scripts/prepare.sh
+      - name: Make room
+        run: |
+          rm -rf "$HOME/.rustup" "$HOME/.cargo"
+          bash scripts/room.sh
+      - uses: actions/cache/restore@v4
+        with:
+          key: base-${{ env.COMMIT }}
+          fail-on-cache-miss: true
+          path: |
+            ~/.rustup
+            ~/android
+            ~/modbuild/cargo
+            ~/modbuild/base
+      - name: Download requested mods
+        run: curl -fsS --retry 5 --retry-all-errors -o mods.bin "$GATEWAY/v1/github/$ASK"
+      - name: Compile native mods
+        env:
+          MOD_BUILD_SECONDS: '3200'
+        run: python3 tools/mod_build_once.py mods.bin "$COMMIT" result
+      - uses: actions/upload-artifact@v4
+        with:
+          name: result
+          path: result/
+          retention-days: 1
+          compression-level: 1
+          if-no-files-found: error
